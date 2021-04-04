@@ -82,36 +82,83 @@ heatmap(matr3, scale = 'column', Colv = NA, Rowv = NA, col=coul)
 
 
 ```{r}
-#slice(.data = fire_cause, 10)
-#fire_cause
-library(GGally)
-#data(flea)
-fire_cause
-data <- fire_cause %>% 
-  arrange(cause) #%>%
-  #mutate(cause = factor(cause, cause))
-data
+units_by_type <- dbGetQuery(con, "SELECT count(distinct(units.UnitId)), count(distinct(f.fod_id)), units.UnitType FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.UnitType")
+```
 
-typeof(fire_cause)
 
-mat <- data
-rownames(mat) <- mat[,1]
-#mat <- mat %>% dplyr::select(-Country, -Group, -Continent)
-mat <- as.matrix(mat)
-#ggpairs(fire_cause, ggplot2::aes(colour=fire_class)) 
+
+```{r}
+dbGetQuery(con, "SELECT COUNT(*), agency FROM NWCG_UnitIDActive_20170109 group by agency order by 1")
+
+
+```
+
+
+```{r}
+# units.GeographicArea is the same as units.gacc, except that California is split into Northern California and Southern California
+# as treemap?
+total_burnt <- dbGetQuery(con, "SELECT sum(f.fire_size), units.gacc FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.gacc ORDER BY 1 DESC")
+
+
+```
+
+
+```{r}
+parsed_datetime <- function(col_prefix) {
+  glue::glue("datetime(date({col_prefix}_date) || ' ' || substr({col_prefix}_time, 1, 2) || ':' || substr({col_prefix}_time, 3, 4) || ':00')")
+}
+
+parsed_time <- function(col_prefix) {
+  glue::glue("substr({col_prefix}_time, 1, 2) || ':' || substr({col_prefix}_time, 3, 4) || ':00'")
+}
 ```
 
 ```{r}
-#fire_sizes <- dbGetQuery(con, "SELECT FIRE_SIZE AS fire_size FROM Fires")
-# data = fire_sizes
-# data %>%
-#   ggplot( aes(x=fire_size)) +
-#     geom_density()+
-#     ggtitle("Fire size in acres") +
-#     theme_ipsum() +
-#     theme(
-#       plot.title = element_text(size=12)
-#     )
+# containment time - discovery time
+dbGetQuery(con, glue::glue(
+  "WITH res AS (
+     SELECT
+       fire_name,
+       fire_size,
+       discovery_date,
+       cont_date,
+       {parsed_datetime('f.discovery')} AS discovery,
+       {parsed_datetime('f.cont')} AS contained,
+       cont_date - discovery_date AS days_diff,
+       time(strftime('%s', {parsed_time('cont')}) - strftime('%s', {parsed_time('discovery')}), 'unixepoch') AS h_diff,
+       fire_year,
+       fire_size_class
+     FROM fires f
+     WHERE 
+           cont_date IS NOT NULL
+       AND cont_time IS NOT NULL
+       AND discovery_date IS NOT NULL
+       AND discovery_time IS NOT NULL -- AND days_diff > 0
+     ORDER BY days_diff DESC, h_diff DESC
+     LIMIT 40
+  )
+  SELECT avg(days_diff), fire_size_class FROM res GROUP BY 2", .con=con))
+  #SELECT fire_year, fire_size, discovery, contained, days_diff, h_diff FROM res", .con=con))
+  #SELECT count(*) from res", .con=con))
+#strftime('%s', {parsed_datetime('f.cont')}) - strftime('%s', {parsed_datetime('f.discovery')}) AS duration
 ```
 
+```{r}
 
+# ??
+#dbGetQuery(con, "SELECT COUNT(*), WildlandRole FROM NWCG_UnitIDActive_20170109 GROUP BY 2")
+#   COUNT(*)                 WildlandRole
+# 1      328 Dispatch/Coordination Center
+# 2       29            Fire/Radio Cashes
+# 3        8     Incident Host Functional
+# 4     5228     Incident Host Geographic
+# 5      266       Resource Provider Only
+# 6        8            Training Facility
+
+# > dbGetQuery(con, "SELECT COUNT(*) FROM NWCG_UnitIDActive_20170109 WHERE Parent IS NULL")
+#   COUNT(*)
+# 1     5867
+# > dbGetQuery(con, "SELECT COUNT(*) FROM NWCG_UnitIDActive_20170109 WHERE Parent IS NOT NULL")
+#   COUNT(*)
+# 1        0
+```
