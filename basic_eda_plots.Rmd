@@ -1,0 +1,117 @@
+---
+title: "Basic EDA plots"
+output: html_notebook
+---
+
+
+```{r}
+library(RSQLite)
+library(tidyverse)
+library(hrbrthemes)
+library(kableExtra)
+con <- dbConnect(RSQLite::SQLite(), "../wildfire/FPA_FOD_20170508.sqlite")
+causes <- dbGetQuery(con, "SELECT COUNT(*) AS nr, STAT_CAUSE_DESCR AS cause_name FROM Fires GROUP BY STAT_CAUSE_DESCR")
+```
+
+```{r}
+causes %>%
+  arrange(nr) %>%
+  mutate(cause_name=factor(cause_name, cause_name)) %>%
+  ggplot( aes(x=cause_name, y=nr) ) +
+    geom_segment(aes(x=cause_name, xend=cause_name, y=0, yend=nr), color="darkgrey") +
+    geom_point(size=4, color='#e34a33', alpha=0.9) +
+    coord_flip() +
+    theme_ipsum() +
+    #xlab("") +
+    labs(x="",y="", title = 'Main causes for wildfires') +
+    theme(
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      #legend.position="none",
+      #axis.text = element_text(hjust = 0.5)
+    )
+```
+
+```{r}
+fire_size_class <- dbGetQuery(con, "SELECT COUNT(*) AS nr, FIRE_SIZE_CLASS AS fire_size FROM Fires GROUP BY FIRE_SIZE_CLASS")
+```
+
+```{r}
+
+fire_size_class %>%
+  arrange(nr) %>%
+  mutate(fire_size=factor(fire_size, fire_size)) %>%
+  ggplot( aes(x=fire_size, y=nr) ) +
+    #geom_segment(aes(x=cause_name, xend=fire_size, y=0, yend=nr), color="darkgrey") +
+    #geom_point(size=4, color='#e34a33', alpha=0.9) +
+    geom_bar(stat='identity', fill='darkred') +
+    coord_flip() +
+    #theme_ipsum() +
+    #xlab("") +
+    labs(x="",y="", title = 'Number of fires by size') +
+    theme(
+      panel.grid.minor.x = element_line(),
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      #axis.ticks.x = fire_size_class$nr
+      #legend.position="none",
+      #axis.text = element_text(hjust = 0.5)
+    ) # + scale_y_discrete(fire_size_class$nr)
+```
+
+What are the most frequent causes for the biggest fires?
+
+Note that these are normalized by column.
+
+```{r}
+fire_cause <- dbGetQuery(con,
+                         "SELECT STAT_CAUSE_DESCR AS cause, FIRE_SIZE_CLASS AS fire_class, COUNT(FIRE_SIZE_CLASS) AS nr
+                         FROM Fires
+                         WHERE FIRE_SIZE_CLASS IN ('D', 'E', 'F', 'G')
+                         GROUP BY 1, 2")
+
+
+nrows <- length(levels(factor(fire_cause$cause)))
+ncols <- length(levels(factor(fire_cause$fire_class)))
+matr3 <- matrix(fire_cause$nr, nrow = nrows, ncol = ncols)
+rownames(matr3) <- levels(factor(fire_cause$cause))
+colnames(matr3) <- levels(factor(fire_cause$fire_class))
+coul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
+heatmap(matr3, scale = 'column', Colv = NA, Rowv = NA, col=coul)
+```
+
+
+```{r}
+#slice(.data = fire_cause, 10)
+#fire_cause
+library(GGally)
+#data(flea)
+fire_cause
+data <- fire_cause %>% 
+  arrange(cause) #%>%
+  #mutate(cause = factor(cause, cause))
+data
+
+typeof(fire_cause)
+
+mat <- data
+rownames(mat) <- mat[,1]
+#mat <- mat %>% dplyr::select(-Country, -Group, -Continent)
+mat <- as.matrix(mat)
+#ggpairs(fire_cause, ggplot2::aes(colour=fire_class)) 
+```
+
+```{r}
+#fire_sizes <- dbGetQuery(con, "SELECT FIRE_SIZE AS fire_size FROM Fires")
+# data = fire_sizes
+# data %>%
+#   ggplot( aes(x=fire_size)) +
+#     geom_density()+
+#     ggtitle("Fire size in acres") +
+#     theme_ipsum() +
+#     theme(
+#       plot.title = element_text(size=12)
+#     )
+```
+
+
