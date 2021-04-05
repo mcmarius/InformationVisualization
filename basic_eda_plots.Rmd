@@ -1,6 +1,7 @@
 ---
 title: "Basic EDA plots"
 output: html_notebook
+# fig_width: 16
 ---
 
 
@@ -9,8 +10,14 @@ library(RSQLite)
 library(tidyverse)
 library(hrbrthemes)
 library(kableExtra)
+library(RColorBrewer)
+library(viridis)
 con <- dbConnect(RSQLite::SQLite(), "../wildfire/FPA_FOD_20170508.sqlite")
 causes <- dbGetQuery(con, "SELECT COUNT(*) AS nr, STAT_CAUSE_DESCR AS cause_name FROM Fires GROUP BY STAT_CAUSE_DESCR")
+
+#knitr::opts_chunk$set(fig.width=16)
+
+# some color ideas from https://colorbrewer2.org
 ```
 
 ```{r}
@@ -81,15 +88,202 @@ heatmap(matr3, scale = 'column', Colv = NA, Rowv = NA, col=coul)
 ```
 
 
+How many wildfires are managed by each unit type? The following pattern might uncover organizational issues.
+
 ```{r}
-units_by_type <- dbGetQuery(con, "SELECT count(distinct(units.UnitId)), count(distinct(f.fod_id)), units.UnitType FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.UnitType")
+# source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+# end of multiplot
+# source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+##############################################################################
+
+
+
+
+
+units_by_type <- dbGetQuery(con, "SELECT count(distinct(units.UnitId)) AS nr_units, count(distinct(f.fod_id)) AS nr_fires, units.UnitType FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.UnitType")
+
+# units_by_type
+# nr_units | nr_fires | UnitType
+#     7      	   40    	Interagency		
+#    11        3725   	Tribe		
+#   526       86871   	US County/Local		
+#   902   	 477787 	  US Federal		
+#   177	    1277285   	US State
+
+# https://www.r-graph-gallery.com/37-barplot-with-number-of-observation.html
+data <- data.frame(
+  counts = units_by_type[,1:2],#) %>% map_int(1L)),
+  units = rep(units_by_type[,3], times=1)
+)
+
+p1 <- data  %>% 
+  #mutate(year=as.factor(year)) %>%
+  ggplot( aes(x=units, y=counts.nr_fires)) +
+    geom_bar(stat="identity", fill='#e6550d') +
+    scale_fill_viridis(discrete=TRUE, name="") +
+    theme_ipsum() +
+    xlab("")+
+    ylab("Number of fires")
+
+p2 <- data  %>% 
+  #mutate(year=as.factor(year)) %>%
+  ggplot( aes(x=units, y=counts.nr_units)) +
+    geom_bar(stat="identity", fill='#2b8cbe') +
+    scale_fill_viridis(discrete=TRUE, name="") +
+    theme_ipsum() +
+    xlab("")+
+    ylab("Number of units")
+multiplot(p1, p2)
+
+```
+
+
+Further down the line, we notice many agencies each with very few units.
+
+```{r}
+# units per agency
+agencies <- dbGetQuery(
+  con, "
+    SELECT
+      COUNT(*) AS nr,
+      agency,
+      CASE agency
+        -- long live multiline editing
+        WHEN	'AG'		THEN	'Air Guard'
+        WHEN	'ANC'		THEN	'Alaska Native Corporation'
+        WHEN	'BIA'		THEN	'Bureau of Indian Affairs'
+        WHEN	'BLM'		THEN	'Bureau of Land Management'
+        WHEN	'BOEM'	THEN	'Bureau of Ocean Energy Management'
+        WHEN	'BOR'		THEN	'Bureau of Reclamation'
+        WHEN	'BSEE'	THEN	'Bureau of Safety and Environmental Enforcement'
+        WHEN	'C&L'		THEN	'County & Local'
+        WHEN	'CDF'		THEN	'California Department of Forestry & Fire Protection'
+        WHEN	'DC'		THEN	'Department of Corrections'
+        WHEN	'DFE'		THEN	'Division of Forest Environment'
+        WHEN	'DFF'		THEN	'Division of Forestry Fire & State Lands'
+        WHEN	'DFL'		THEN	'Division of Forests and Land'
+        WHEN	'DFR'		THEN	'Division of Forest Resources'
+        WHEN	'DL'		THEN	'Department of Lands'
+        WHEN	'DNR'		THEN	'Department of Natural Resources'
+        WHEN	'DNRC'	THEN	'Department of Natural Resources and Conservation'
+        WHEN	'DNRF'	THEN	'Department of Natural Resources Forest Service'
+        WHEN	'DOA'		THEN	'Department of Agriculture'
+        WHEN	'DOC'		THEN	'Department of Conservation'
+        WHEN	'DOE'		THEN	'Department of Energy'
+        WHEN	'DOF'		THEN	'Department of Forestry'
+        WHEN	'DVF'		THEN	'Division of Forestry'
+        WHEN	'DWF'		THEN	'Division of Wildland Fire'
+        WHEN	'EPA'		THEN	'Environmental Protection Agency'
+        WHEN	'FC'		THEN	'Forestry Commission'
+        WHEN	'FEMA'	THEN	'Federal Emergency Management Agency'
+        WHEN	'FFC'		THEN	'Bureau of Forest Fire Control'
+        WHEN	'FFP'		THEN	'Forest Fire Protection'
+        WHEN	'FFS'		THEN	'Forest Fire Service'
+        WHEN	'FR'		THEN	'Forest Rangers'
+        WHEN	'FS'		THEN	'Forest Service'
+        WHEN	'FWS'		THEN	'Fish & Wildlife Service'
+        WHEN	'HQ'		THEN	'Headquarters'
+        WHEN	'JC'		THEN	'Job Corps'
+        WHEN	'NBC'		THEN	'National Business Center'
+        WHEN	'NG'		THEN	'National Guard'
+        WHEN	'NNSA'	THEN	'National Nuclear Security Administration'
+        WHEN	'NPS'		THEN	'National Park Service'
+        WHEN	'NWS'		THEN	'National Weather Service'
+        WHEN	'OES'		THEN	'Office of Emergency Services'
+        WHEN	'PRI'		THEN	'Private'
+        WHEN	'SF'		THEN	'State Forestry'
+        WHEN	'SFS'		THEN	'State Forest Service'
+        WHEN	'SP'		THEN	'State Parks'
+        WHEN	'TNC'		THEN	'The Nature Conservancy'
+        WHEN	'USA'		THEN	'United States Army'
+        WHEN	'USACE'	THEN	'United States Army Corps of Engineers'
+        WHEN	'USAF'	THEN	'United States Air Force'
+        WHEN	'USGS'	THEN	'United States Geological Survey'
+        WHEN	'USN'		THEN	'United States Navy'
+      END AS agency_name
+    FROM NWCG_UnitIDActive_20170109
+    GROUP BY agency
+    ORDER BY 1 DESC")
+
+agencies
+data <- data.frame(
+  id = agencies$Agency,
+  name = agencies$agency_name,
+  value = agencies$nr
+)
 ```
 
 
 
-```{r}
-dbGetQuery(con, "SELECT COUNT(*), agency FROM NWCG_UnitIDActive_20170109 group by agency order by 1")
+```{r fig.width=16}
 
+# https://www.r-graph-gallery.com/296-add-labels-to-circular-barplot
+ 
+# Get the name and the y position of each label
+data <- data  %>% filter(name != "<NA>") %>% arrange(value) %>%
+   mutate(id=factor(id, id))
+label_data <- data %>% filter(name != "<NA>")
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (as.integer(label_data$id)-0.5) /number_of_bar     # I substract 0.5 because the letter must have the angle of the center of the bars. Not extreme right(1) or extreme left (0)
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+ 
+# Make the plot
+p <- data %>% filter(name != "<NA>") %>%
+  arrange(value) %>%
+  mutate(id=factor(id, id)) %>%
+  ggplot(aes(x=as.factor(id), y=value)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+  geom_bar(stat="identity", fill=alpha("darkgreen", 0.6)) +
+  ylim(-100,120) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm") 
+  ) +
+  coord_polar(start = 0) + 
+  geom_text(data=label_data, aes(x=id, y=value+10, label=name, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=3, angle= label_data$angle, inherit.aes = FALSE ) 
+ 
+
+p
+#ggplot2::ggsave('asd.pdf', p, device = 'pdf')
 
 ```
 
@@ -97,9 +291,30 @@ dbGetQuery(con, "SELECT COUNT(*), agency FROM NWCG_UnitIDActive_20170109 group b
 ```{r}
 # units.GeographicArea is the same as units.gacc, except that California is split into Northern California and Southern California
 # as treemap?
-total_burnt <- dbGetQuery(con, "SELECT sum(f.fire_size), units.gacc FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.gacc ORDER BY 1 DESC")
+total_burnt <- dbGetQuery(
+  con,
+  "SELECT
+     SUM(f.fire_size) AS total,
+     CASE units.GeographicArea
+        WHEN 'NA' THEN 'National'
+        WHEN 'IN' THEN 'International'
+        WHEN 'AK' THEN 'Alaska'
+        WHEN 'CA' THEN 'California'
+        WHEN 'EA' THEN 'Eastern Area'
+        WHEN 'GB' THEN 'Great Basin'
+        WHEN 'NR' THEN 'Northern Rockies'
+        WHEN 'NW' THEN 'Northwest'
+        WHEN 'RM' THEN 'Rocky Mountain'
+        WHEN 'SA' THEN 'Southern Area'
+        WHEN 'SW' THEN 'Southwest'
+     END geographic_area
+   FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.GeographicArea ORDER BY 1 DESC")
 
+total_burnt
 
+library(treemap)
+# idea: scale by population to determine the most affected regions
+treemap::treemap(total_burnt, index = 'geographic_area', vSize = 'total', type = 'index', title = "What region burned the most?")
 ```
 
 
@@ -141,6 +356,16 @@ dbGetQuery(con, glue::glue(
   #SELECT fire_year, fire_size, discovery, contained, days_diff, h_diff FROM res", .con=con))
   #SELECT count(*) from res", .con=con))
 #strftime('%s', {parsed_datetime('f.cont')}) - strftime('%s', {parsed_datetime('f.discovery')}) AS duration
+```
+
+
+```{r}
+# misc
+# units not found in units table
+# dbGetQuery(con, "with ids as (SELECT unitId from NWCG_UnitIDActive_20170109) select count(distinct NWCG_REPORTING_UNIT_ID) from fires where NWCG_REPORTING_UNIT_ID not in ids")
+#   count(distinct NWCG_REPORTING_UNIT_ID)
+# 1                                     17
+# 34757 fire records belong to these units
 ```
 
 ```{r}
