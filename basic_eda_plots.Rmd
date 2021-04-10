@@ -1,9 +1,9 @@
 ---
 title: "Basic EDA plots"
-output: html_notebook
-# fig_width: 16
+output:
+  html_notebook:
+    df_print: paged
 ---
-
 
 ```{r}
 library(RSQLite)
@@ -12,15 +12,22 @@ library(hrbrthemes)
 library(kableExtra)
 library(RColorBrewer)
 library(viridis)
+# library(ggridges)
+
+
 con <- dbConnect(RSQLite::SQLite(), "../wildfire/FPA_FOD_20170508.sqlite")
 causes <- dbGetQuery(con, "SELECT COUNT(*) AS nr, STAT_CAUSE_DESCR AS cause_name FROM Fires GROUP BY STAT_CAUSE_DESCR")
 
 #knitr::opts_chunk$set(fig.width=16)
 
+# https://www.reddit.com/r/RStudio/comments/euew3l/preview_button_gone_can_only_knit/
+
 # some color ideas from https://colorbrewer2.org
 ```
 
 ```{r}
+# https://www.data-to-viz.com/graph/lollipop.html
+
 causes %>%
   arrange(nr) %>%
   mutate(cause_name=factor(cause_name, cause_name)) %>%
@@ -44,6 +51,7 @@ fire_size_class <- dbGetQuery(con, "SELECT COUNT(*) AS nr, FIRE_SIZE_CLASS AS fi
 ```
 
 ```{r}
+# https://www.data-to-viz.com/graph/barplot.html
 
 fire_size_class %>%
   arrange(nr) %>%
@@ -51,7 +59,7 @@ fire_size_class %>%
   ggplot( aes(x=fire_size, y=nr) ) +
     #geom_segment(aes(x=cause_name, xend=fire_size, y=0, yend=nr), color="darkgrey") +
     #geom_point(size=4, color='#e34a33', alpha=0.9) +
-    geom_bar(stat='identity', fill='darkred') +
+    geom_bar(stat='identity', fill='darkred', width = 0.75) +
     coord_flip() +
     #theme_ipsum() +
     #xlab("") +
@@ -68,9 +76,12 @@ fire_size_class %>%
 
 What are the most frequent causes for the biggest fires?
 
-Note that these are normalized by column.
+Note that these are normalized by column (fire class).
 
 ```{r}
+# https://www.data-to-viz.com/graph/heatmap.html
+# https://www.r-graph-gallery.com/215-the-heatmap-function.html
+
 fire_cause <- dbGetQuery(con,
                          "SELECT STAT_CAUSE_DESCR AS cause, FIRE_SIZE_CLASS AS fire_class, COUNT(FIRE_SIZE_CLASS) AS nr
                          FROM Fires
@@ -80,11 +91,41 @@ fire_cause <- dbGetQuery(con,
 
 nrows <- length(levels(factor(fire_cause$cause)))
 ncols <- length(levels(factor(fire_cause$fire_class)))
-matr3 <- matrix(fire_cause$nr, nrow = nrows, ncol = ncols)
+matr3 <- t(matrix(fire_cause$nr, nrow = ncols, ncol = nrows))
 rownames(matr3) <- levels(factor(fire_cause$cause))
 colnames(matr3) <- levels(factor(fire_cause$fire_class))
 coul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
-heatmap(matr3, scale = 'column', Colv = NA, Rowv = NA, col=coul)
+d3heatmap(matr3, scale = 'column', Colv = NA, Rowv = NA, col=coul,  yaxis_width = 200, width = 700, title = 'The most frequent causes for the biggest fires')
+```
+
+Debugging purposes. Previous version of this plot had wrong data.
+
+```{r}
+matr3
+```
+```{r}
+fire_cause %>% filter(cause == 'Debris Burning')
+```
+
+
+
+```{r}
+# sources: same as previous heatmap
+
+sfire_cause <- dbGetQuery(con,
+                         "SELECT STAT_CAUSE_DESCR AS cause, FIRE_SIZE_CLASS AS fire_class, COUNT(FIRE_SIZE_CLASS) AS nr
+                         FROM Fires
+                         WHERE FIRE_SIZE_CLASS IN ('A', 'B', 'C')
+                         GROUP BY 1, 2")
+
+
+snrows <- length(levels(factor(sfire_cause$cause)))
+sncols <- length(levels(factor(sfire_cause$fire_class)))
+smatr3 <- t(matrix(sfire_cause$nr, nrow = sncols, ncol = snrows))
+rownames(smatr3) <- levels(factor(sfire_cause$cause))
+colnames(smatr3) <- levels(factor(sfire_cause$fire_class))
+scoul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
+d3heatmap(smatr3, scale = 'column', Colv = NA, Rowv = NA, col=scoul, yaxis_width = 200, width = 700, main = 'The most frequent causes for small fires')
 ```
 
 
@@ -152,6 +193,9 @@ data <- data.frame(
   units = rep(units_by_type[,3], times=1)
 )
 
+# same as the barplot above
+# colors picked to show fires with some sort of red and units with some sort of blue (obvious reasons)
+
 p1 <- data  %>% 
   #mutate(year=as.factor(year)) %>%
   ggplot( aes(x=units, y=counts.nr_fires)) +
@@ -178,6 +222,8 @@ Further down the line, we notice many agencies each with very few units.
 
 ```{r}
 # units per agency
+# units names taken from kaggle dataset description
+
 agencies <- dbGetQuery(
   con, "
     SELECT
@@ -312,9 +358,11 @@ total_burnt <- dbGetQuery(
 
 total_burnt
 
+# https://www.r-graph-gallery.com/234-a-very-basic-treemap.html
+
 library(treemap)
 # idea: scale by population to determine the most affected regions
-treemap::treemap(total_burnt, index = 'geographic_area', vSize = 'total', type = 'index', title = "What region burned the most?")
+treemap::treemap(total_burnt, index = 'geographic_area', vSize = 'total', type = 'index', title = "What regions burned the most?")
 ```
 
 
@@ -330,7 +378,7 @@ parsed_time <- function(col_prefix) {
 
 ```{r}
 # containment time - discovery time
-dbGetQuery(con, glue::glue(
+all_diffs <- dbGetQuery(con, glue::glue(
   "WITH res AS (
      SELECT
        fire_name,
@@ -350,14 +398,59 @@ dbGetQuery(con, glue::glue(
        AND discovery_date IS NOT NULL
        AND discovery_time IS NOT NULL -- AND days_diff > 0
      ORDER BY days_diff DESC, h_diff DESC
-     LIMIT 40
+     --LIMIT -1 OFFSET 1000
+     --LIMIT 40
   )
-  SELECT avg(days_diff), fire_size_class FROM res GROUP BY 2", .con=con))
+  
+  SELECT days_diff, h_diff, cast(strftime('%s', contained) - strftime('%s', discovery) as real) / (24*3600) AS tm_diff, fire_size_class FROM res", .con=con))
+  # SELECT avg(days_diff), fire_size_class FROM res GROUP BY 2", .con=con))
   #SELECT fire_year, fire_size, discovery, contained, days_diff, h_diff FROM res", .con=con))
   #SELECT count(*) from res", .con=con))
 #strftime('%s', {parsed_datetime('f.cont')}) - strftime('%s', {parsed_datetime('f.discovery')}) AS duration
+#end
+all_diffs[1:7,]
 ```
 
+
+There seem to be bogus entries: small fires not being estinguished for more than a couple of years:
+```{r}
+# links: see below
+
+ggplot(all_diffs, aes(x = `days_diff`, y = `fire_size_class`, fill = ..y..)) +
+  geom_violin(scale = 3) +
+  scale_fill_viridis(name = "days_diff", option = "C") +
+  labs(title = 'Days from discovery to containment (raw)') +
+  theme_ipsum() +
+    theme(
+      legend.position="none",
+      #panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    )
+```
+
+```{r}
+# https://www.data-to-viz.com/graph/violin.html
+# https://www.data-to-viz.com/caveat/boxplot.html
+all_diffs[-8000:0,][1,]
+
+all_diffs2 = all_diffs[-1000:0,] %>% filter(fire_size_class < 'E') %>% filter(tm_diff < 2) # || fire_size_class == 'C')
+all_diffs2
+sample_size = all_diffs2 %>% group_by(fire_size_class) %>% summarize(num=n())
+all_diffs2 %>%
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(fire_size_class, "\n", "n=", num)) %>%
+ggplot(aes(x = tm_diff, y = myaxis, fill=..y..)) +
+  geom_violin(scale = 3) +
+    geom_boxplot(width=0.1, color="grey", alpha=0.2) +
+  scale_fill_viridis(name = "days_diff", option = "C") +
+  labs(title = 'Days from discovery to containment') +
+  theme_ipsum() +
+    theme(
+      legend.position="none",
+      #panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    )
+```
 
 ```{r}
 # misc
