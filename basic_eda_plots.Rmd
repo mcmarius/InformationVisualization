@@ -12,6 +12,7 @@ library(hrbrthemes)
 library(kableExtra)
 library(RColorBrewer)
 library(viridis)
+library(d3heatmap)
 # library(ggridges)
 
 
