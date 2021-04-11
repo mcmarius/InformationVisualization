@@ -1,0 +1,56 @@
+---
+title: "Geographical EDA Plots"
+output: html_document
+---
+
+
+```{r}
+library(RSQLite)
+library(ggplot2)
+library(maps)
+library(usdata)
+library(dplyr)
+con <- dbConnect(RSQLite::SQLite(), "wildfire/FPA_FOD_20170508.sqlite")
+
+```
+
+
+```{r}
+numberoffires <- dbGetQuery(con, "SELECT STATE as state, COUNT(DISTINCT FIRE_NAME) AS Count FROM Fires GROUP BY STATE ")
+numberoffires$state= abbr2state(numberoffires$state)
+numberoffires <- na.omit(numberoffires)
+row.names(numberoffires) <- numberoffires$state
+numberoffires <- subset(numberoffires, select = -c(state))
+```
+
+```{r}
+choro <- left_join(
+  map_data("state"), 
+  numberoffires %>% 
+    add_rownames("region") %>% 
+    mutate(region=tolower(region))
+)
+ggplot(choro, aes(long, lat)) +
+  geom_polygon(aes(group = group, fill = Count)) + 
+  coord_quickmap() + labs(title = "Total fires")
+```
+
+```{r}
+surfaceaffected <- dbGetQuery(con, "SELECT f.state as state, SUM(f.Surface) AS Surface FROM (SELECT DISTINCT FIRE_NAME as name, SUM(FIRE_SIZE) as Surface, STATE as state FROM Fires GROUP BY FIRE_NAME) as f GROUP BY f.state")
+surfaceaffected$state= abbr2state(surfaceaffected$state)
+surfaceaffected <- na.omit(surfaceaffected)
+row.names(surfaceaffected) <- surfaceaffected$state
+surfaceaffected <- subset(surfaceaffected, select = -c(state))
+```
+
+```{r}
+surface <- left_join(
+  map_data("state"), 
+  surfaceaffected %>% 
+    add_rownames("region") %>% 
+    mutate(region=tolower(region))
+)
+ggplot(surface, aes(long, lat)) +
+  geom_polygon(aes(group = group, fill = Surface)) + 
+  coord_quickmap() + labs(title = "Total surface affected")
+```
