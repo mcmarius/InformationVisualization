@@ -1,0 +1,483 @@
+---
+title: "Basic EDA plots"
+output:
+  html_notebook:
+    df_print: paged
+---
+
+```{r}
+library(RSQLite)
+library(tidyverse)
+library(hrbrthemes)
+library(kableExtra)
+library(RColorBrewer)
+library(viridis)
+library(d3heatmap)
+# library(ggridges)
+
+
+con <- dbConnect(RSQLite::SQLite(), "../wildfire/FPA_FOD_20170508.sqlite")
+causes <- dbGetQuery(con, "SELECT COUNT(*) AS nr, STAT_CAUSE_DESCR AS cause_name FROM Fires GROUP BY STAT_CAUSE_DESCR")
+
+#knitr::opts_chunk$set(fig.width=16)
+
+# https://www.reddit.com/r/RStudio/comments/euew3l/preview_button_gone_can_only_knit/
+
+# some color ideas from https://colorbrewer2.org
+```
+
+```{r}
+# https://www.data-to-viz.com/graph/lollipop.html
+
+causes %>%
+  arrange(nr) %>%
+  mutate(cause_name=factor(cause_name, cause_name)) %>%
+  ggplot( aes(x=cause_name, y=nr) ) +
+    geom_segment(aes(x=cause_name, xend=cause_name, y=0, yend=nr), color="darkgrey") +
+    geom_point(size=4, color='#e34a33', alpha=0.9) +
+    coord_flip() +
+    theme_ipsum() +
+    #xlab("") +
+    labs(x="",y="", title = 'Main causes for wildfires') +
+    theme(
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      #legend.position="none",
+      #axis.text = element_text(hjust = 0.5)
+    )
+```
+
+```{r}
+fire_size_class <- dbGetQuery(con, "SELECT COUNT(*) AS nr, FIRE_SIZE_CLASS AS fire_size FROM Fires GROUP BY FIRE_SIZE_CLASS")
+```
+
+```{r}
+# https://www.data-to-viz.com/graph/barplot.html
+
+fire_size_class %>%
+  arrange(nr) %>%
+  mutate(fire_size=factor(fire_size, fire_size)) %>%
+  ggplot( aes(x=fire_size, y=nr) ) +
+    #geom_segment(aes(x=cause_name, xend=fire_size, y=0, yend=nr), color="darkgrey") +
+    #geom_point(size=4, color='#e34a33', alpha=0.9) +
+    geom_bar(stat='identity', fill='darkred', width = 0.75) +
+    coord_flip() +
+    #theme_ipsum() +
+    #xlab("") +
+    labs(x="",y="", title = 'Number of fires by size') +
+    theme(
+      panel.grid.minor.x = element_line(),
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      #axis.ticks.x = fire_size_class$nr
+      #legend.position="none",
+      #axis.text = element_text(hjust = 0.5)
+    ) # + scale_y_discrete(fire_size_class$nr)
+```
+
+What are the most frequent causes for the biggest fires?
+
+Note that these are normalized by column (fire class).
+
+```{r}
+# https://www.data-to-viz.com/graph/heatmap.html
+# https://www.r-graph-gallery.com/215-the-heatmap-function.html
+
+fire_cause <- dbGetQuery(con,
+                         "SELECT STAT_CAUSE_DESCR AS cause, FIRE_SIZE_CLASS AS fire_class, COUNT(FIRE_SIZE_CLASS) AS nr
+                         FROM Fires
+                         WHERE FIRE_SIZE_CLASS IN ('D', 'E', 'F', 'G')
+                         GROUP BY 1, 2")
+
+
+nrows <- length(levels(factor(fire_cause$cause)))
+ncols <- length(levels(factor(fire_cause$fire_class)))
+matr3 <- t(matrix(fire_cause$nr, nrow = ncols, ncol = nrows))
+rownames(matr3) <- levels(factor(fire_cause$cause))
+colnames(matr3) <- levels(factor(fire_cause$fire_class))
+coul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
+d3heatmap(matr3, scale = 'column', Colv = NA, Rowv = NA, col=coul,  yaxis_width = 200, width = 700, title = 'The most frequent causes for the biggest fires')
+```
+
+Debugging purposes. Previous version of this plot had wrong data.
+
+```{r}
+matr3
+```
+```{r}
+fire_cause %>% filter(cause == 'Debris Burning')
+```
+
+
+
+```{r}
+# sources: same as previous heatmap
+
+sfire_cause <- dbGetQuery(con,
+                         "SELECT STAT_CAUSE_DESCR AS cause, FIRE_SIZE_CLASS AS fire_class, COUNT(FIRE_SIZE_CLASS) AS nr
+                         FROM Fires
+                         WHERE FIRE_SIZE_CLASS IN ('A', 'B', 'C')
+                         GROUP BY 1, 2")
+
+
+snrows <- length(levels(factor(sfire_cause$cause)))
+sncols <- length(levels(factor(sfire_cause$fire_class)))
+smatr3 <- t(matrix(sfire_cause$nr, nrow = sncols, ncol = snrows))
+rownames(smatr3) <- levels(factor(sfire_cause$cause))
+colnames(smatr3) <- levels(factor(sfire_cause$fire_class))
+scoul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
+d3heatmap(smatr3, scale = 'column', Colv = NA, Rowv = NA, col=scoul, yaxis_width = 200, width = 700, main = 'The most frequent causes for small fires')
+```
+
+
+How many wildfires are managed by each unit type? The following pattern might uncover organizational issues.
+
+```{r}
+# source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+# end of multiplot
+# source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+##############################################################################
+
+
+
+
+
+units_by_type <- dbGetQuery(con, "SELECT count(distinct(units.UnitId)) AS nr_units, count(distinct(f.fod_id)) AS nr_fires, units.UnitType FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.UnitType")
+
+# units_by_type
+# nr_units | nr_fires | UnitType
+#     7      	   40    	Interagency		
+#    11        3725   	Tribe		
+#   526       86871   	US County/Local		
+#   902   	 477787 	  US Federal		
+#   177	    1277285   	US State
+
+# https://www.r-graph-gallery.com/37-barplot-with-number-of-observation.html
+data <- data.frame(
+  counts = units_by_type[,1:2],#) %>% map_int(1L)),
+  units = rep(units_by_type[,3], times=1)
+)
+
+# same as the barplot above
+# colors picked to show fires with some sort of red and units with some sort of blue (obvious reasons)
+
+p1 <- data  %>% 
+  #mutate(year=as.factor(year)) %>%
+  ggplot( aes(x=units, y=counts.nr_fires)) +
+    geom_bar(stat="identity", fill='#e6550d') +
+    scale_fill_viridis(discrete=TRUE, name="") +
+    theme_ipsum() +
+    xlab("")+
+    ylab("Number of fires")
+
+p2 <- data  %>% 
+  #mutate(year=as.factor(year)) %>%
+  ggplot( aes(x=units, y=counts.nr_units)) +
+    geom_bar(stat="identity", fill='#2b8cbe') +
+    scale_fill_viridis(discrete=TRUE, name="") +
+    theme_ipsum() +
+    xlab("")+
+    ylab("Number of units")
+multiplot(p1, p2)
+
+```
+
+
+Further down the line, we notice many agencies each with very few units.
+
+```{r}
+# units per agency
+# units names taken from kaggle dataset description
+
+agencies <- dbGetQuery(
+  con, "
+    SELECT
+      COUNT(*) AS nr,
+      agency,
+      CASE agency
+        -- long live multiline editing
+        WHEN	'AG'		THEN	'Air Guard'
+        WHEN	'ANC'		THEN	'Alaska Native Corporation'
+        WHEN	'BIA'		THEN	'Bureau of Indian Affairs'
+        WHEN	'BLM'		THEN	'Bureau of Land Management'
+        WHEN	'BOEM'	THEN	'Bureau of Ocean Energy Management'
+        WHEN	'BOR'		THEN	'Bureau of Reclamation'
+        WHEN	'BSEE'	THEN	'Bureau of Safety and Environmental Enforcement'
+        WHEN	'C&L'		THEN	'County & Local'
+        WHEN	'CDF'		THEN	'California Department of Forestry & Fire Protection'
+        WHEN	'DC'		THEN	'Department of Corrections'
+        WHEN	'DFE'		THEN	'Division of Forest Environment'
+        WHEN	'DFF'		THEN	'Division of Forestry Fire & State Lands'
+        WHEN	'DFL'		THEN	'Division of Forests and Land'
+        WHEN	'DFR'		THEN	'Division of Forest Resources'
+        WHEN	'DL'		THEN	'Department of Lands'
+        WHEN	'DNR'		THEN	'Department of Natural Resources'
+        WHEN	'DNRC'	THEN	'Department of Natural Resources and Conservation'
+        WHEN	'DNRF'	THEN	'Department of Natural Resources Forest Service'
+        WHEN	'DOA'		THEN	'Department of Agriculture'
+        WHEN	'DOC'		THEN	'Department of Conservation'
+        WHEN	'DOE'		THEN	'Department of Energy'
+        WHEN	'DOF'		THEN	'Department of Forestry'
+        WHEN	'DVF'		THEN	'Division of Forestry'
+        WHEN	'DWF'		THEN	'Division of Wildland Fire'
+        WHEN	'EPA'		THEN	'Environmental Protection Agency'
+        WHEN	'FC'		THEN	'Forestry Commission'
+        WHEN	'FEMA'	THEN	'Federal Emergency Management Agency'
+        WHEN	'FFC'		THEN	'Bureau of Forest Fire Control'
+        WHEN	'FFP'		THEN	'Forest Fire Protection'
+        WHEN	'FFS'		THEN	'Forest Fire Service'
+        WHEN	'FR'		THEN	'Forest Rangers'
+        WHEN	'FS'		THEN	'Forest Service'
+        WHEN	'FWS'		THEN	'Fish & Wildlife Service'
+        WHEN	'HQ'		THEN	'Headquarters'
+        WHEN	'JC'		THEN	'Job Corps'
+        WHEN	'NBC'		THEN	'National Business Center'
+        WHEN	'NG'		THEN	'National Guard'
+        WHEN	'NNSA'	THEN	'National Nuclear Security Administration'
+        WHEN	'NPS'		THEN	'National Park Service'
+        WHEN	'NWS'		THEN	'National Weather Service'
+        WHEN	'OES'		THEN	'Office of Emergency Services'
+        WHEN	'PRI'		THEN	'Private'
+        WHEN	'SF'		THEN	'State Forestry'
+        WHEN	'SFS'		THEN	'State Forest Service'
+        WHEN	'SP'		THEN	'State Parks'
+        WHEN	'TNC'		THEN	'The Nature Conservancy'
+        WHEN	'USA'		THEN	'United States Army'
+        WHEN	'USACE'	THEN	'United States Army Corps of Engineers'
+        WHEN	'USAF'	THEN	'United States Air Force'
+        WHEN	'USGS'	THEN	'United States Geological Survey'
+        WHEN	'USN'		THEN	'United States Navy'
+      END AS agency_name
+    FROM NWCG_UnitIDActive_20170109
+    GROUP BY agency
+    ORDER BY 1 DESC")
+
+agencies
+data <- data.frame(
+  id = agencies$Agency,
+  name = agencies$agency_name,
+  value = agencies$nr
+)
+```
+
+
+
+```{r fig.width=16}
+
+# https://www.r-graph-gallery.com/296-add-labels-to-circular-barplot
+ 
+# Get the name and the y position of each label
+data <- data  %>% filter(name != "<NA>") %>% arrange(value) %>%
+   mutate(id=factor(id, id))
+label_data <- data %>% filter(name != "<NA>")
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (as.integer(label_data$id)-0.5) /number_of_bar     # I substract 0.5 because the letter must have the angle of the center of the bars. Not extreme right(1) or extreme left (0)
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+ 
+# Make the plot
+p <- data %>% filter(name != "<NA>") %>%
+  arrange(value) %>%
+  mutate(id=factor(id, id)) %>%
+  ggplot(aes(x=as.factor(id), y=value)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+  geom_bar(stat="identity", fill=alpha("darkgreen", 0.6)) +
+  ylim(-100,120) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm") 
+  ) +
+  coord_polar(start = 0) + 
+  geom_text(data=label_data, aes(x=id, y=value+10, label=name, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=3, angle= label_data$angle, inherit.aes = FALSE ) 
+ 
+
+p
+#ggplot2::ggsave('asd.pdf', p, device = 'pdf')
+
+```
+
+
+```{r}
+# units.GeographicArea is the same as units.gacc, except that California is split into Northern California and Southern California
+# as treemap?
+total_burnt <- dbGetQuery(
+  con,
+  "SELECT
+     SUM(f.fire_size) AS total,
+     CASE units.GeographicArea
+        WHEN 'NA' THEN 'National'
+        WHEN 'IN' THEN 'International'
+        WHEN 'AK' THEN 'Alaska'
+        WHEN 'CA' THEN 'California'
+        WHEN 'EA' THEN 'Eastern Area'
+        WHEN 'GB' THEN 'Great Basin'
+        WHEN 'NR' THEN 'Northern Rockies'
+        WHEN 'NW' THEN 'Northwest'
+        WHEN 'RM' THEN 'Rocky Mountain'
+        WHEN 'SA' THEN 'Southern Area'
+        WHEN 'SW' THEN 'Southwest'
+     END geographic_area
+   FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.GeographicArea ORDER BY 1 DESC")
+
+total_burnt
+
+# https://www.r-graph-gallery.com/234-a-very-basic-treemap.html
+
+library(treemap)
+# idea: scale by population to determine the most affected regions
+treemap::treemap(total_burnt, index = 'geographic_area', vSize = 'total', type = 'index', title = "What regions burned the most?")
+```
+
+
+```{r}
+parsed_datetime <- function(col_prefix) {
+  glue::glue("datetime(date({col_prefix}_date) || ' ' || substr({col_prefix}_time, 1, 2) || ':' || substr({col_prefix}_time, 3, 4) || ':00')")
+}
+
+parsed_time <- function(col_prefix) {
+  glue::glue("substr({col_prefix}_time, 1, 2) || ':' || substr({col_prefix}_time, 3, 4) || ':00'")
+}
+```
+
+```{r}
+# containment time - discovery time
+all_diffs <- dbGetQuery(con, glue::glue(
+  "WITH res AS (
+     SELECT
+       fire_name,
+       fire_size,
+       discovery_date,
+       cont_date,
+       {parsed_datetime('f.discovery')} AS discovery,
+       {parsed_datetime('f.cont')} AS contained,
+       cont_date - discovery_date AS days_diff,
+       time(strftime('%s', {parsed_time('cont')}) - strftime('%s', {parsed_time('discovery')}), 'unixepoch') AS h_diff,
+       fire_year,
+       fire_size_class
+     FROM fires f
+     WHERE 
+           cont_date IS NOT NULL
+       AND cont_time IS NOT NULL
+       AND discovery_date IS NOT NULL
+       AND discovery_time IS NOT NULL -- AND days_diff > 0
+     ORDER BY days_diff DESC, h_diff DESC
+     --LIMIT -1 OFFSET 1000
+     --LIMIT 40
+  )
+  
+  SELECT days_diff, h_diff, cast(strftime('%s', contained) - strftime('%s', discovery) as real) / (24*3600) AS tm_diff, fire_size_class FROM res", .con=con))
+  # SELECT avg(days_diff), fire_size_class FROM res GROUP BY 2", .con=con))
+  #SELECT fire_year, fire_size, discovery, contained, days_diff, h_diff FROM res", .con=con))
+  #SELECT count(*) from res", .con=con))
+#strftime('%s', {parsed_datetime('f.cont')}) - strftime('%s', {parsed_datetime('f.discovery')}) AS duration
+#end
+all_diffs[1:7,]
+```
+
+
+There seem to be bogus entries: small fires not being estinguished for more than a couple of years:
+```{r}
+# links: see below
+
+ggplot(all_diffs, aes(x = `days_diff`, y = `fire_size_class`, fill = ..y..)) +
+  geom_violin(scale = 3) +
+  scale_fill_viridis(name = "days_diff", option = "C") +
+  labs(title = 'Days from discovery to containment (raw)') +
+  theme_ipsum() +
+    theme(
+      legend.position="none",
+      #panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    )
+```
+
+```{r}
+# https://www.data-to-viz.com/graph/violin.html
+# https://www.data-to-viz.com/caveat/boxplot.html
+all_diffs[-8000:0,][1,]
+
+all_diffs2 = all_diffs[-1000:0,] %>% filter(fire_size_class < 'E') %>% filter(tm_diff < 2) # || fire_size_class == 'C')
+all_diffs2
+sample_size = all_diffs2 %>% group_by(fire_size_class) %>% summarize(num=n())
+all_diffs2 %>%
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(fire_size_class, "\n", "n=", num)) %>%
+ggplot(aes(x = tm_diff, y = myaxis, fill=..y..)) +
+  geom_violin(scale = 3) +
+    geom_boxplot(width=0.1, color="grey", alpha=0.2) +
+  scale_fill_viridis(name = "days_diff", option = "C") +
+  labs(title = 'Days from discovery to containment') +
+  theme_ipsum() +
+    theme(
+      legend.position="none",
+      #panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    )
+```
+
+```{r}
+# misc
+# units not found in units table
+# dbGetQuery(con, "with ids as (SELECT unitId from NWCG_UnitIDActive_20170109) select count(distinct NWCG_REPORTING_UNIT_ID) from fires where NWCG_REPORTING_UNIT_ID not in ids")
+#   count(distinct NWCG_REPORTING_UNIT_ID)
+# 1                                     17
+# 34757 fire records belong to these units
+```
+
+```{r}
+
+# ??
+#dbGetQuery(con, "SELECT COUNT(*), WildlandRole FROM NWCG_UnitIDActive_20170109 GROUP BY 2")
+#   COUNT(*)                 WildlandRole
+# 1      328 Dispatch/Coordination Center
+# 2       29            Fire/Radio Cashes
+# 3        8     Incident Host Functional
+# 4     5228     Incident Host Geographic
+# 5      266       Resource Provider Only
+# 6        8            Training Facility
+
+# > dbGetQuery(con, "SELECT COUNT(*) FROM NWCG_UnitIDActive_20170109 WHERE Parent IS NULL")
+#   COUNT(*)
+# 1     5867
+# > dbGetQuery(con, "SELECT COUNT(*) FROM NWCG_UnitIDActive_20170109 WHERE Parent IS NOT NULL")
+#   COUNT(*)
+# 1        0
+```
