@@ -10,6 +10,9 @@ library(ggplot2)
 library(maps)
 library(usdata)
 library(dplyr)
+library(ggmap)
+library(RColorBrewer)
+library(gganimate)
 con <- dbConnect(RSQLite::SQLite(), "wildfire/FPA_FOD_20170508.sqlite")
 
 ```
@@ -53,4 +56,36 @@ surface <- left_join(
 ggplot(surface, aes(long, lat)) +
   geom_polygon(aes(group = group, fill = Surface)) + 
   coord_quickmap() + labs(title = "Total surface affected")
+```
+
+```{r}
+
+# 1,88 milion points is too much, one state is enough, my ram can't even handle chrome,
+
+alaskaFires <- dbGetQuery(con, "SELECT F.LATITUDE,F.LONGITUDE,F.FIRE_NAME,F.STATE, F.FIRE_YEAR FROM Fires F WHERE F.STATE = 'AK'")
+
+alaska <- get_stamenmap(bbox = c(left = -180, bottom = 55, right = -120, top = 72), zoom = 5)
+
+ggm <-ggmap(alaska) +
+stat_density_2d(
+data = alaskaFires,
+aes(
+  x = LONGITUDE,
+  y = LATITUDE,
+  fill = stat(level)
+),
+alpha = .2,
+bins = 25,
+geom = "polygon"
+) +
+scale_fill_gradientn(colors = brewer.pal(7, "YlOrRd"))+
+  labs(title = 'Year: {frame_time}')+
+  transition_time(FIRE_YEAR)
+
+animate(ggm, fps = 24, duration = 32,renderer=gifski_renderer("alaska.gif"))
+```
+
+
+```{r, fig.cap="Alaska wildfires"}
+knitr::include_graphics("alaska.gif")
 ```
