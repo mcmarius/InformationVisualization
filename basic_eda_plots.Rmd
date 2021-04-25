@@ -13,6 +13,8 @@ library(kableExtra)
 library(RColorBrewer)
 library(viridis)
 library(d3heatmap)
+library(naivebayes)
+library(yardstick)
 # library(ggridges)
 
 
@@ -452,6 +454,28 @@ ggplot(aes(x = tm_diff, y = myaxis, fill=..y..)) +
       strip.text.x = element_text(size = 8)
     )
 ```
+
+```{r}
+all_data <- dbGetQuery(con, "SELECT * from fires")
+x <- all_data %>% select(STAT_CAUSE_DESCR, DISCOVERY_DOY, CONT_DOY, OWNER_DESCR, STATE, FIRE_SIZE_CLASS) %>% drop_na()
+all_data[1,]
+# y <- x$FIRE_SIZE_CLASS
+# x <- x %>% select(!matches("FIRE_SIZE_CLASS"))
+n <- as.integer(6e5)
+# nb <- naive_bayes(x = x[1:n,], y = y[1:n], laplace = 1e-5)
+df <- as.data.frame(x)
+train <- df[1:n,]
+n1 <- 50000
+test <- df[n+1:n1,]
+test <- test %>% select(!matches("FIRE_SIZE_CLASS"))
+
+nb <- naive_bayes(FIRE_SIZE_CLASS ~ ., train, laplace = 1e-7)
+sum(df[n+1:n1,]$FIRE_SIZE_CLASS == predict(nb, test, type = "class"))/n1
+preds <- predict(nb, test, type = "class")
+#as.tibble(df[n+1:n1,]$FIRE_SIZE_CLASS) %>% conf_mat(preds, fire_size_class)
+#conf_mat(as.data.frame(preds), truth = FIRE_SIZE_CLASS, estimate = fire_size_class)
+```
+
 
 ```{r}
 # misc
