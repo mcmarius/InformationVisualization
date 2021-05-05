@@ -1,0 +1,80 @@
+---
+title: "models"
+output: html_document
+---
+
+
+```{r}
+library(RSQLite)
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(class)
+library(tidyverse)
+library(BBmisc)
+con <- dbConnect(RSQLite::SQLite(), "wildfire/FPA_FOD_20170508.sqlite")
+```
+
+```{r}
+# Create the predictor and response variable.
+Fires <- dbGetQuery(con, "SELECT SUM(FIRE_SIZE) as Surface, FIRE_YEAR as Year FROM FIRES GROUP BY FIRE_YEAR ORDER BY FIRE_YEAR")
+
+set.seed(123)
+training.samples <- Fires$Surface %>%
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- Fires[training.samples, ]
+test.data <- Fires[-training.samples, ]
+
+
+# Build the modell
+model <- lm(as.vector(t(Fires$Surface)) ~ poly(as.vector(t(Fires$Year)), 5, raw = TRUE), data = train.data)
+# Make predictions
+predictions <- model %>% predict(test.data)
+# Model performance
+
+Years <- train.data$Year
+Surface <- train.data$Surface
+
+
+ggplot(train.data, aes(Years, Surface) ) +
+  geom_point() +
+  stat_smooth(method = lm, formula = y ~ poly(x, 5, raw = TRUE))
+
+
+```
+
+```{r}
+FireData <- dbGetQuery(con, "SELECT STATE, (CONT_DOY - DISCOVERY_DOY) * 24 + (CONT_TIME - DISCOVERY_TIME)  / 100 + ((CONT_TIME - DISCOVERY_TIME ) % 100) % 60 AS DURATION, STAT_CAUSE_CODE, LATITUDE, LONGITUDE, FIRE_SIZE_CLASS FROM FIRES") 
+FireData <- na.omit(FireData)
+FireData$STATE <- as.numeric(factor(FireData$STATE))
+FireData$FIRE_SIZE_CLASS <- as.numeric(factor(FireData$FIRE_SIZE_CLASS))
+FireData$DURATION <- (FireData$DURATION-min(FireData$DURATION))/(max(FireData$DURATION)-min(FireData$DURATION))
+
+
+set.seed(123)
+training.samples <- FireData$FIRE_SIZE_CLASS %>% createDataPartition(p = 0.8, list = FALSE)
+test.data  <- FireData[training.samples, ]
+train.data <- FireData[-training.samples, ]
+
+X_train <- train.data %>% select(!matches("FIRE_SIZE_CLASS"))
+Y_train <- train.data$FIRE_SIZE_CLASS
+
+X_test <- test.data %>% select(!matches("FIRE_SIZE_CLASS"))
+Y_test <- test.data$FIRE_SIZE_CLASS
+
+knnModel <- knn(X_train, X_test, Y_train, k = 5)
+```
+
+```{r}
+cm <- confusionMatrix(knnModel,as.factor(Y_test))
+
+confusionmatrix <- as.data.frame((cm$table-min(cm$table))/(max(cm$table)-min(cm$table)))
+
+ggplot(confusionmatrix, aes(Prediction,sort(Reference,decreasing = T), fill= Freq)) +
+        geom_tile() + geom_text(aes(label=round(Freq,2))) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction") +
+        scale_x_discrete(labels=c("Class_1","Class_2","Class_3","Class_4","Class_5","Class_6","Class_7")) +
+        scale_y_discrete(labels=c("Class_7","Class_6","Class_5","Class_4","Class_3","Class_2","Class_1"))
+
+```
