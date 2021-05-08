@@ -15,6 +15,9 @@ library(viridis)
 library(d3heatmap)
 library(naivebayes)
 library(yardstick)
+library(ranger)
+library(caret)
+#library(Metrics)
 # library(ggridges)
 
 
@@ -205,7 +208,7 @@ p1 <- data  %>%
     geom_bar(stat="identity", fill='#e6550d') +
     scale_fill_viridis(discrete=TRUE, name="") +
     theme_ipsum() +
-    xlab("")+
+    xlab("Unit type")+
     ylab("Number of fires")
 
 p2 <- data  %>% 
@@ -214,7 +217,7 @@ p2 <- data  %>%
     geom_bar(stat="identity", fill='#2b8cbe') +
     scale_fill_viridis(discrete=TRUE, name="") +
     theme_ipsum() +
-    xlab("")+
+    xlab("Unit type")+
     ylab("Number of units")
 multiplot(p1, p2)
 
@@ -441,12 +444,12 @@ all_diffs2
 sample_size = all_diffs2 %>% group_by(fire_size_class) %>% summarize(num=n())
 all_diffs2 %>%
   left_join(sample_size) %>%
-  mutate(myaxis = paste0(fire_size_class, "\n", "n=", num)) %>%
-ggplot(aes(x = tm_diff, y = myaxis, fill=..y..)) +
+  mutate(fire_size = paste0(fire_size_class, "\n", "n=", num)) %>%
+ggplot(aes(x = tm_diff, y = fire_size, fill=..y..)) +
   geom_violin(scale = 3) +
     geom_boxplot(width=0.1, color="grey", alpha=0.2) +
   scale_fill_viridis(name = "days_diff", option = "C") +
-  labs(title = 'Days from discovery to containment') +
+  labs(title = 'Days from discovery to containment (small fires)') +
   theme_ipsum() +
     theme(
       legend.position="none",
@@ -455,27 +458,98 @@ ggplot(aes(x = tm_diff, y = myaxis, fill=..y..)) +
     )
 ```
 
+
 ```{r}
+all_diffs3 = all_diffs %>% filter(fire_size_class > 'D') %>% filter(tm_diff < 365) # || fire_size_class == 'C')
+all_diffs3
+sample_size = all_diffs3 %>% group_by(fire_size_class) %>% summarize(num=n())
+all_diffs3 %>%
+  left_join(sample_size) %>%
+  mutate(fire_size = paste0(fire_size_class, "\n", "n=", num)) %>%
+ggplot(aes(x = tm_diff, y = fire_size, fill=..y..)) +
+  geom_violin(scale = 3) +
+    geom_boxplot(width=0.1, color="grey", alpha=0.2) +
+  scale_fill_viridis(name = "days_diff", option = "C") +
+  labs(title = 'Days from discovery to containment (large fires)') +
+  theme_ipsum() +
+    theme(
+      legend.position="none",
+      #panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    )
+```
+
+Unfortunately, data for large fires is incomplete or missing.
+
+Therefore, the following prediction tasks are limited to small fires.
+
+Naive Bayes to predict the size of a fire
+
+```{r}
+# https://yardstick.tidymodels.org/reference/conf_mat.html
 all_data <- dbGetQuery(con, "SELECT DISTINCT (fod_id), * from fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId")
 x <- all_data %>% select(STAT_CAUSE_DESCR, DISCOVERY_DOY,UnitType,Department,GeographicArea, OWNER_DESCR, STATE, FIRE_SIZE_CLASS) %>% drop_na() %>% filter(FIRE_SIZE_CLASS < "D")
+
 all_data[1,]
-# y <- x$FIRE_SIZE_CLASS
-# x <- x %>% select(!matches("FIRE_SIZE_CLASS"))
-n <- as.integer(1.4e6)
+
 # nb <- naive_bayes(x = x[1:n,], y = y[1:n], laplace = 1e-5)
 df <- sample(as.data.frame(x))
-train <- df[1:n,]
-n1 <- 100000
-test <- df[n+1:n1,]
+
+data_split <- df$FIRE_SIZE_CLASS %>% createDataPartition(p = 0.8, list = FALSE)
+train  <- df[data_split, ]
+test <- df[-data_split, ]
+
 test2 <- test
 test <- test %>% select(!matches("FIRE_SIZE_CLASS"))
 
 nb <- naive_bayes(FIRE_SIZE_CLASS ~ ., train, laplace = 1e-7)
-sum(df[n+1:n1,]$FIRE_SIZE_CLASS == predict(nb, test, type = "class"))/n1
 preds <- predict(nb, test, type = "class")
+# accuracy
+sum(test2$FIRE_SIZE_CLASS == preds)/length(test2$FIRE_SIZE_CLASS)
+# 0.5924989
 test2$pred <- preds
 #as.tibble(df[n+1:n1,]$FIRE_SIZE_CLASS) %>% conf_mat(preds, fire_size_class)
-test2 %>% conf_mat(pred, FIRE_SIZE_CLASS)
+cm <- test2 %>% conf_mat(pred, FIRE_SIZE_CLASS)
+
+autoplot(cm, type="heatmap")+scale_fill_gradient(low="white", high="#009194")
+```
+
+Random forest to predict the cause of a fire
+
+```{r}
+# https://stackoverflow.com/a/64539733
+# https://www.datanovia.com/en/blog/ggplot-axis-ticks-set-and-rotate-text-labels/
+# https://bradleyboehmke.github.io/HOML/random-forest.html
+
+x <- all_data %>% select(STAT_CAUSE_DESCR, DISCOVERY_DOY,UnitType,Department,GeographicArea, OWNER_DESCR, STATE, FIRE_SIZE, FIRE_SIZE_CLASS, CONT_DOY, SOURCE_SYSTEM_TYPE, NWCG_REPORTING_UNIT_NAME, LATITUDE, LONGITUDE, SOURCE_REPORTING_UNIT_NAME) %>% drop_na() %>% filter(FIRE_SIZE_CLASS < "D") %>% select(!matches("FIRE_SIZE_CLASS"))
+x
+
+df <- sample(as.data.frame(x))
+data_split <- df$STAT_CAUSE_DESCR %>% createDataPartition(p = 0.8, list = FALSE)
+train  <- df[data_split, ]
+test <- df[-data_split, ]
+
+test2 <- test
+test <- test %>% select(!matches("STAT_CAUSE_DESCR"))
+
+model3 <- ranger(STAT_CAUSE_DESCR ~ ., train, num.trees = 20)
+
+
+model3$confusion.matrix
+
+#test2$STAT_CAUSE_DESCR <- as.factor(test2$STAT_CAUSE_DESCR)
+preds <- predict(model3, data=test)
+test2$preds <- preds$predictions
+
+# accuracy
+sum(test2$STAT_CAUSE_DESCR == test2$preds)/length(test2$preds)
+# [1] 0.5819649  # 0.5835164
+# baseline - majority class
+sum(test2$STAT_CAUSE_DESCR == "Lightning")/length(test2$STAT_CAUSE_DESCR)
+#[1] 0.2286784
+
+cm <- test2 %>% conf_mat(preds, STAT_CAUSE_DESCR)
+autoplot(cm, type="heatmap")+scale_fill_gradient(low="white", high="#009194") +theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 ```{r}
