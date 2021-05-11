@@ -1,5 +1,5 @@
 ---
-title: "Basic EDA plots"
+title: "General EDA plots and models"
 output:
   html_notebook:
     df_print: paged
@@ -17,10 +17,14 @@ library(naivebayes)
 library(yardstick)
 library(ranger)
 library(caret)
+library(treemap)
+# library(d3treeR)
+library(highcharter)
 #library(Metrics)
 # library(ggridges)
+```
 
-
+```{r}
 con <- dbConnect(RSQLite::SQLite(), "../wildfire/FPA_FOD_20170508.sqlite")
 causes <- dbGetQuery(con, "SELECT COUNT(*) AS nr, STAT_CAUSE_DESCR AS cause_name FROM Fires GROUP BY STAT_CAUSE_DESCR")
 
@@ -42,8 +46,9 @@ causes %>%
     geom_point(size=4, color='#e34a33', alpha=0.9) +
     coord_flip() +
     theme_ipsum() +
-    #xlab("") +
-    labs(x="",y="", title = 'Main causes for wildfires') +
+    # xlab("") +
+    labs(x="Cause",y="Number of fires", title = 'Main causes for wildfires') +
+    #labs(x="",y="", title = 'Main causes for wildfires') +
     theme(
       panel.grid.minor.y = element_blank(),
       panel.grid.major.y = element_blank(),
@@ -69,7 +74,8 @@ fire_size_class %>%
     coord_flip() +
     #theme_ipsum() +
     #xlab("") +
-    labs(x="",y="", title = 'Number of fires by size') +
+    #labs(x="",y="", title = 'Number of fires by size') +
+    labs(x="Fire size class",y="Number of fires", title = 'Number of fires by size') +
     theme(
       panel.grid.minor.x = element_line(),
       panel.grid.minor.y = element_blank(),
@@ -93,7 +99,9 @@ fire_cause <- dbGetQuery(con,
                          FROM Fires
                          WHERE FIRE_SIZE_CLASS IN ('D', 'E', 'F', 'G')
                          GROUP BY 1, 2")
+```
 
+```{r}
 
 nrows <- length(levels(factor(fire_cause$cause)))
 ncols <- length(levels(factor(fire_cause$fire_class)))
@@ -102,15 +110,6 @@ rownames(matr3) <- levels(factor(fire_cause$cause))
 colnames(matr3) <- levels(factor(fire_cause$fire_class))
 coul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
 d3heatmap(matr3, scale = 'column', Colv = NA, Rowv = NA, col=coul,  yaxis_width = 200, width = 700, title = 'The most frequent causes for the biggest fires')
-```
-
-Debugging purposes. Previous version of this plot had wrong data.
-
-```{r}
-matr3
-```
-```{r}
-fire_cause %>% filter(cause == 'Debris Burning')
 ```
 
 
@@ -124,7 +123,9 @@ sfire_cause <- dbGetQuery(con,
                          WHERE FIRE_SIZE_CLASS IN ('A', 'B', 'C')
                          GROUP BY 1, 2")
 
+```
 
+```{r}
 snrows <- length(levels(factor(sfire_cause$cause)))
 sncols <- length(levels(factor(sfire_cause$fire_class)))
 smatr3 <- t(matrix(sfire_cause$nr, nrow = sncols, ncol = snrows))
@@ -133,6 +134,27 @@ colnames(smatr3) <- levels(factor(sfire_cause$fire_class))
 scoul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
 d3heatmap(smatr3, scale = 'column', Colv = NA, Rowv = NA, col=scoul, yaxis_width = 200, width = 700, main = 'The most frequent causes for small fires')
 ```
+
+
+
+```{r}
+all_fire_cause <- dbGetQuery(con,
+                         "SELECT STAT_CAUSE_DESCR AS cause, FIRE_SIZE_CLASS AS fire_class, COUNT(FIRE_SIZE_CLASS) AS nr
+                         FROM Fires
+                         GROUP BY 1, 2")
+anrows <- length(levels(factor(all_fire_cause$cause)))
+ancols <- length(levels(factor(all_fire_cause$fire_class)))
+amatr3 <- t(matrix(all_fire_cause$nr, nrow = ancols, ncol = anrows))
+rownames(amatr3) <- levels(factor(all_fire_cause$cause))
+colnames(amatr3) <- levels(factor(all_fire_cause$fire_class))
+acoul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
+d3heatmap(amatr3, scale = 'column', Colv = NA, Rowv = NA, col=acoul, yaxis_width = 200, width = 700, main = 'The most frequent causes for all fires')
+```
+
+
+
+
+
 
 
 How many wildfires are managed by each unit type? The following pattern might uncover organizational issues.
@@ -179,9 +201,9 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 # source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
 ##############################################################################
 
+```
 
-
-
+```{r}
 
 units_by_type <- dbGetQuery(con, "SELECT count(distinct(units.UnitId)) AS nr_units, count(distinct(f.fod_id)) AS nr_fires, units.UnitType FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.UnitType")
 
@@ -192,6 +214,9 @@ units_by_type <- dbGetQuery(con, "SELECT count(distinct(units.UnitId)) AS nr_uni
 #   526       86871   	US County/Local		
 #   902   	 477787 	  US Federal		
 #   177	    1277285   	US State
+```
+
+```{r}
 
 # https://www.r-graph-gallery.com/37-barplot-with-number-of-observation.html
 data <- data.frame(
@@ -331,18 +356,19 @@ p <- data %>% filter(name != "<NA>") %>%
     plot.margin = unit(rep(-1,4), "cm") 
   ) +
   coord_polar(start = 0) + 
+  #labs(title = 'Number of units per agency') +
   geom_text(data=label_data, aes(x=id, y=value+10, label=name, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=3, angle= label_data$angle, inherit.aes = FALSE ) 
  
 
 p
-#ggplot2::ggsave('asd.pdf', p, device = 'pdf')
+#ggplot2::ggsave('circular_plot.pdf', p, device = 'pdf')
 
 ```
 
 
 ```{r}
 # units.GeographicArea is the same as units.gacc, except that California is split into Northern California and Southern California
-# as treemap?
+# as treemap
 total_burnt <- dbGetQuery(
   con,
   "SELECT
@@ -363,12 +389,88 @@ total_burnt <- dbGetQuery(
    FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.GeographicArea ORDER BY 1 DESC")
 
 total_burnt
+```
 
+
+```{r}
 # https://www.r-graph-gallery.com/234-a-very-basic-treemap.html
 
-library(treemap)
-# idea: scale by population to determine the most affected regions
 treemap::treemap(total_burnt, index = 'geographic_area', vSize = 'total', type = 'index', title = "What regions burned the most?")
+```
+
+
+```{r}
+# https://github.com/jakevdp/data-USstates
+abbrevs <- read.csv('us_state-abbrevs.csv')
+census <- read.csv('us_state-population.csv') %>%
+  filter(ages == "total" & year == 2012) %>%
+  merge(abbrevs, by.x = c("state.region"), by.y = c("abbreviation")) %>%
+  select(state, population)
+
+# note: Alaska and California regions have been renamed because the highcharts
+# library requires unique labels across all levels
+total_burnt2 <- dbGetQuery(
+  con,
+  "SELECT
+     SUM(f.fire_size) AS total, f.state AS abbreviation,
+     CASE units.GeographicArea
+        WHEN 'NA' THEN 'National'
+        WHEN 'IN' THEN 'International'
+        WHEN 'AK' THEN 'Alaska (region)'
+        WHEN 'CA' THEN 'California (region)'
+        WHEN 'EA' THEN 'Eastern Area'
+        WHEN 'GB' THEN 'Great Basin'
+        WHEN 'NR' THEN 'Northern Rockies'
+        WHEN 'NW' THEN 'Northwest'
+        WHEN 'RM' THEN 'Rocky Mountain'
+        WHEN 'SA' THEN 'Southern Area'
+        WHEN 'SW' THEN 'Southwest'
+     END geographic_area
+   FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId
+   GROUP BY units.GeographicArea, f.state
+   ORDER BY 1 DESC") %>%
+# total_burnt2 <-
+  # dbGetQuery(con, "SELECT SUM(f.fire_size) AS total, state,  FROM Fires f GROUP BY state ORDER BY 1 DESC") %>%
+  merge(abbrevs) %>% #, by.x = c("state"), by.y = c("abbreviation")) %>%
+  merge(census)
+total_burnt2$affected <- (total_burnt2$population * total_burnt2$total)
+```
+
+```{r}
+# https://www.datanovia.com/en/lessons/highchart-interactive-treemap-in-r/
+# https://www.rdocumentation.org/packages/highcharter/versions/0.8.2/topics/hctreemap
+# https://api.highcharts.com/highcharts/plotOptions.treemap.allowTraversingTree
+options(highcharter.theme = hc_theme_smpl(tooltip = list(valueDecimals = 2)))
+highcharter::
+total_burnt2
+tree <- treemap(
+  total_burnt2,
+  index = c('geographic_area', 'state'),
+  vSize = 'affected',
+  type = 'index',
+  title = "What states were the most affected?",
+  align.labels = list(c('center', 'center'), c('center', 'center')))
+
+
+hchart(
+  data_to_hierarchical(total_burnt2, group_vars = c(geographic_area, state), size_var = 'population'),
+  type = "treemap",
+  allowTraversingTree = T,
+  layoutAlgorithm = "sliceAndDice",  # squarified
+  layoutStartingDirection = "vertical"  # horizontal
+) %>% hc_title(text = 'US regions by population')
+```
+
+```{r}
+hchart(
+  data_to_hierarchical(total_burnt2, group_vars = c(geographic_area, state), size_var = 'affected'),
+  type = "treemap", allowTraversingTree = T,
+  layoutAlgorithm = "sliceAndDice",  # squarified
+  layoutStartingDirection = "vertical"  # horizontal
+) %>%
+  hc_title(text = 'US regions by burned area and population')
+  #hc_tooltip(enabled = F)
+# d3tree(tree, 'What regions and states were the most affected?', width = '780', height = '450')
 ```
 
 
@@ -425,7 +527,7 @@ There seem to be bogus entries: small fires not being estinguished for more than
 ggplot(all_diffs, aes(x = `days_diff`, y = `fire_size_class`, fill = ..y..)) +
   geom_violin(scale = 3) +
   scale_fill_viridis(name = "days_diff", option = "C") +
-  labs(title = 'Days from discovery to containment (raw)') +
+  labs(title = 'Days from discovery to containment (raw)', x = "Days", y = "Fire size class") +
   theme_ipsum() +
     theme(
       legend.position="none",
@@ -449,7 +551,7 @@ ggplot(aes(x = tm_diff, y = fire_size, fill=..y..)) +
   geom_violin(scale = 3) +
     geom_boxplot(width=0.1, color="grey", alpha=0.2) +
   scale_fill_viridis(name = "days_diff", option = "C") +
-  labs(title = 'Days from discovery to containment (small fires)') +
+  labs(title = 'Days from discovery to containment (small fires)', x = "Days", y = "Fire size class") +
   theme_ipsum() +
     theme(
       legend.position="none",
@@ -470,7 +572,7 @@ ggplot(aes(x = tm_diff, y = fire_size, fill=..y..)) +
   geom_violin(scale = 3) +
     geom_boxplot(width=0.1, color="grey", alpha=0.2) +
   scale_fill_viridis(name = "days_diff", option = "C") +
-  labs(title = 'Days from discovery to containment (large fires)') +
+  labs(title = 'Days from discovery to containment (large fires)', x = "Days", y = "Fire size class") +
   theme_ipsum() +
     theme(
       legend.position="none",
@@ -509,6 +611,10 @@ sum(test2$FIRE_SIZE_CLASS == preds)/length(test2$FIRE_SIZE_CLASS)
 # 0.5924989
 test2$pred <- preds
 #as.tibble(df[n+1:n1,]$FIRE_SIZE_CLASS) %>% conf_mat(preds, fire_size_class)
+```
+
+
+```{r}
 cm <- test2 %>% conf_mat(pred, FIRE_SIZE_CLASS)
 
 autoplot(cm, type="heatmap")+scale_fill_gradient(low="white", high="#009194")
@@ -522,7 +628,7 @@ Random forest to predict the cause of a fire
 # https://bradleyboehmke.github.io/HOML/random-forest.html
 
 x <- all_data %>% select(STAT_CAUSE_DESCR, DISCOVERY_DOY,UnitType,Department,GeographicArea, OWNER_DESCR, STATE, FIRE_SIZE, FIRE_SIZE_CLASS, CONT_DOY, SOURCE_SYSTEM_TYPE, NWCG_REPORTING_UNIT_NAME, LATITUDE, LONGITUDE, SOURCE_REPORTING_UNIT_NAME) %>% drop_na() %>% filter(FIRE_SIZE_CLASS < "D") %>% select(!matches("FIRE_SIZE_CLASS"))
-x
+x$STAT_CAUSE_DESCR <- as.factor(x$STAT_CAUSE_DESCR)
 
 df <- sample(as.data.frame(x))
 data_split <- df$STAT_CAUSE_DESCR %>% createDataPartition(p = 0.8, list = FALSE)
@@ -533,7 +639,6 @@ test2 <- test
 test <- test %>% select(!matches("STAT_CAUSE_DESCR"))
 
 model3 <- ranger(STAT_CAUSE_DESCR ~ ., train, num.trees = 20)
-
 
 model3$confusion.matrix
 
@@ -547,13 +652,15 @@ sum(test2$STAT_CAUSE_DESCR == test2$preds)/length(test2$preds)
 # baseline - majority class
 sum(test2$STAT_CAUSE_DESCR == "Lightning")/length(test2$STAT_CAUSE_DESCR)
 #[1] 0.2286784
+```
 
+```{r}
 cm <- test2 %>% conf_mat(preds, STAT_CAUSE_DESCR)
 autoplot(cm, type="heatmap")+scale_fill_gradient(low="white", high="#009194") +theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 ```{r}
-dbDisconnect(conn = con)
+#dbDisconnect(conn = con)
 ```
 
 
