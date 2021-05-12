@@ -441,15 +441,15 @@ total_burnt2$affected <- (total_burnt2$population * total_burnt2$total)
 # https://www.rdocumentation.org/packages/highcharter/versions/0.8.2/topics/hctreemap
 # https://api.highcharts.com/highcharts/plotOptions.treemap.allowTraversingTree
 options(highcharter.theme = hc_theme_smpl(tooltip = list(valueDecimals = 2)))
-highcharter::
+
 total_burnt2
-tree <- treemap(
-  total_burnt2,
-  index = c('geographic_area', 'state'),
-  vSize = 'affected',
-  type = 'index',
-  title = "What states were the most affected?",
-  align.labels = list(c('center', 'center'), c('center', 'center')))
+# tree <- treemap(
+#   total_burnt2,
+#   index = c('geographic_area', 'state'),
+#   vSize = 'affected',
+#   type = 'index',
+#   title = "What states were the most affected?",
+#   align.labels = list(c('center', 'center'), c('center', 'center')))
 
 
 hchart(
