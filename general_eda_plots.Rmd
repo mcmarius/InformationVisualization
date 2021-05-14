@@ -3,7 +3,12 @@ title: "General EDA plots and models"
 output:
   html_notebook:
     df_print: paged
+    toc: true
+    toc_float:
+      toc_collapsed: true
 ---
+
+[Homepage](https://mcmarius.github.io/InformationVisualization/)
 
 ```{r}
 library(RSQLite)
@@ -35,6 +40,11 @@ causes <- dbGetQuery(con, "SELECT COUNT(*) AS nr, STAT_CAUSE_DESCR AS cause_name
 # some color ideas from https://colorbrewer2.org
 ```
 
+
+# Main causes
+
+## What are the causes for wildfires?
+
 ```{r}
 # https://www.data-to-viz.com/graph/lollipop.html
 
@@ -61,6 +71,8 @@ causes %>%
 fire_size_class <- dbGetQuery(con, "SELECT COUNT(*) AS nr, FIRE_SIZE_CLASS AS fire_size FROM Fires GROUP BY FIRE_SIZE_CLASS")
 ```
 
+## Almost 2 million fires? Is there anything left?
+
 ```{r}
 # https://www.data-to-viz.com/graph/barplot.html
 
@@ -86,7 +98,7 @@ fire_size_class %>%
     ) # + scale_y_discrete(fire_size_class$nr)
 ```
 
-What are the most frequent causes for the biggest fires?
+## What are the most frequent causes for the biggest fires?
 
 Note that these are normalized by column (fire class).
 
@@ -151,13 +163,11 @@ acoul <- colorRampPalette(brewer.pal(8, "OrRd"))(25)
 d3heatmap(amatr3, scale = 'column', Colv = NA, Rowv = NA, col=acoul, yaxis_width = 200, width = 700, main = 'The most frequent causes for all fires')
 ```
 
+# Time series
+## Are there fires all year long?
 
+[Let us take a closer look through the lens of time.](Timeseries)
 
-
-
-
-
-How many wildfires are managed by each unit type? The following pattern might uncover organizational issues.
 
 ```{r}
 # source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
@@ -216,6 +226,12 @@ units_by_type <- dbGetQuery(con, "SELECT count(distinct(units.UnitId)) AS nr_uni
 #   177	    1277285   	US State
 ```
 
+# Another possible explanation besides global warming
+## How many wildfires are managed by each unit type?
+
+The following pattern might uncover organizational issues.
+
+
 ```{r}
 
 # https://www.r-graph-gallery.com/37-barplot-with-number-of-observation.html
@@ -259,6 +275,7 @@ agencies <- dbGetQuery(
   con, "
     SELECT
       COUNT(*) AS nr,
+      --unitType,
       agency,
       CASE agency
         -- long live multiline editing
@@ -315,10 +332,12 @@ agencies <- dbGetQuery(
         WHEN	'USN'		THEN	'United States Navy'
       END AS agency_name
     FROM NWCG_UnitIDActive_20170109
-    GROUP BY agency
+    WHERE agency IS NOT NULL
+    GROUP BY agency --, unitType
     ORDER BY 1 DESC")
 
 agencies
+# 398 units with NULL agency
 data <- data.frame(
   id = agencies$Agency,
   name = agencies$agency_name,
@@ -327,6 +346,7 @@ data <- data.frame(
 ```
 
 
+## There are many agencies with very few units each
 
 ```{r fig.width=16}
 
@@ -365,114 +385,30 @@ p
 
 ```
 
+So indeed it might also be an administrative problem, as the previous plots suggest. Despite having many agencies, these agencies do not have enough units.
 
 ```{r}
-# units.GeographicArea is the same as units.gacc, except that California is split into Northern California and Southern California
-# as treemap
-total_burnt <- dbGetQuery(
-  con,
-  "SELECT
-     SUM(f.fire_size) AS total,
-     CASE units.GeographicArea
-        WHEN 'NA' THEN 'National'
-        WHEN 'IN' THEN 'International'
-        WHEN 'AK' THEN 'Alaska'
-        WHEN 'CA' THEN 'California'
-        WHEN 'EA' THEN 'Eastern Area'
-        WHEN 'GB' THEN 'Great Basin'
-        WHEN 'NR' THEN 'Northern Rockies'
-        WHEN 'NW' THEN 'Northwest'
-        WHEN 'RM' THEN 'Rocky Mountain'
-        WHEN 'SA' THEN 'Southern Area'
-        WHEN 'SW' THEN 'Southwest'
-     END geographic_area
-   FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.GeographicArea ORDER BY 1 DESC")
 
-total_burnt
+agencies_by_unit_type <- dbGetQuery(con, "SELECT count(distinct(agency)) AS nr_agencies, units.UnitType FROM NWCG_UnitIDActive_20170109 units GROUP BY units.UnitType")
+agencies_by_unit_type
 ```
 
 
 ```{r}
-# https://www.r-graph-gallery.com/234-a-very-basic-treemap.html
-
-treemap::treemap(total_burnt, index = 'geographic_area', vSize = 'total', type = 'index', title = "What regions burned the most?")
+state_agencies <- dbGetQuery(
+  con, "
+    SELECT
+      COUNT(*) AS nr,
+      agency    
+    FROM NWCG_UnitIDActive_20170109
+    WHERE unitType = 'US State'
+    GROUP BY agency
+    ORDER BY 1 DESC")
+state_agencies
 ```
 
 
-```{r}
-# https://github.com/jakevdp/data-USstates
-abbrevs <- read.csv('us_state-abbrevs.csv')
-census <- read.csv('us_state-population.csv') %>%
-  filter(ages == "total" & year == 2012) %>%
-  merge(abbrevs, by.x = c("state.region"), by.y = c("abbreviation")) %>%
-  select(state, population)
-
-# note: Alaska and California regions have been renamed because the highcharts
-# library requires unique labels across all levels
-total_burnt2 <- dbGetQuery(
-  con,
-  "SELECT
-     SUM(f.fire_size) AS total, f.state AS abbreviation,
-     CASE units.GeographicArea
-        WHEN 'NA' THEN 'National'
-        WHEN 'IN' THEN 'International'
-        WHEN 'AK' THEN 'Alaska (region)'
-        WHEN 'CA' THEN 'California (region)'
-        WHEN 'EA' THEN 'Eastern Area'
-        WHEN 'GB' THEN 'Great Basin'
-        WHEN 'NR' THEN 'Northern Rockies'
-        WHEN 'NW' THEN 'Northwest'
-        WHEN 'RM' THEN 'Rocky Mountain'
-        WHEN 'SA' THEN 'Southern Area'
-        WHEN 'SW' THEN 'Southwest'
-     END geographic_area
-   FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId
-   GROUP BY units.GeographicArea, f.state
-   ORDER BY 1 DESC") %>%
-# total_burnt2 <-
-  # dbGetQuery(con, "SELECT SUM(f.fire_size) AS total, state,  FROM Fires f GROUP BY state ORDER BY 1 DESC") %>%
-  merge(abbrevs) %>% #, by.x = c("state"), by.y = c("abbreviation")) %>%
-  merge(census)
-total_burnt2$affected <- (total_burnt2$population * total_burnt2$total)
-```
-
-```{r}
-# https://www.datanovia.com/en/lessons/highchart-interactive-treemap-in-r/
-# https://www.rdocumentation.org/packages/highcharter/versions/0.8.2/topics/hctreemap
-# https://api.highcharts.com/highcharts/plotOptions.treemap.allowTraversingTree
-options(highcharter.theme = hc_theme_smpl(tooltip = list(valueDecimals = 2)))
-
-total_burnt2
-# tree <- treemap(
-#   total_burnt2,
-#   index = c('geographic_area', 'state'),
-#   vSize = 'affected',
-#   type = 'index',
-#   title = "What states were the most affected?",
-#   align.labels = list(c('center', 'center'), c('center', 'center')))
-
-
-hchart(
-  data_to_hierarchical(total_burnt2, group_vars = c(geographic_area, state), size_var = 'population'),
-  type = "treemap",
-  allowTraversingTree = T,
-  layoutAlgorithm = "sliceAndDice",  # squarified
-  layoutStartingDirection = "vertical"  # horizontal
-) %>% hc_title(text = 'US regions by population')
-```
-
-```{r}
-hchart(
-  data_to_hierarchical(total_burnt2, group_vars = c(geographic_area, state), size_var = 'affected'),
-  type = "treemap", allowTraversingTree = T,
-  layoutAlgorithm = "sliceAndDice",  # squarified
-  layoutStartingDirection = "vertical"  # horizontal
-) %>%
-  hc_title(text = 'US regions by burned area and population')
-  #hc_tooltip(enabled = F)
-# d3tree(tree, 'What regions and states were the most affected?', width = '780', height = '450')
-```
-
+## Noisy data
 
 ```{r}
 parsed_datetime <- function(col_prefix) {
@@ -520,7 +456,8 @@ all_diffs[1:7,]
 ```
 
 
-There seem to be bogus entries: small fires not being estinguished for more than a couple of years:
+There seem to be bogus entries: small fires not being estinguished for more than a couple of years
+
 ```{r}
 # links: see below
 
@@ -535,6 +472,8 @@ ggplot(all_diffs, aes(x = `days_diff`, y = `fire_size_class`, fill = ..y..)) +
       strip.text.x = element_text(size = 8)
     )
 ```
+
+We remove the first thousand entries and fires lasting more than 2 days
 
 ```{r}
 # https://www.data-to-viz.com/graph/violin.html
@@ -560,6 +499,7 @@ ggplot(aes(x = tm_diff, y = fire_size, fill=..y..)) +
     )
 ```
 
+We remove fires lasting more than a year
 
 ```{r}
 all_diffs3 = all_diffs %>% filter(fire_size_class > 'D') %>% filter(tm_diff < 365) # || fire_size_class == 'C')
@@ -581,11 +521,140 @@ ggplot(aes(x = tm_diff, y = fire_size, fill=..y..)) +
     )
 ```
 
+
+
+
+# Geographic data
+## What regions burned the most?
+
+```{r}
+# units.GeographicArea is the same as units.gacc, except that California is split into Northern California and Southern California
+# as treemap
+total_burnt <- dbGetQuery(
+  con,
+  "SELECT
+     SUM(f.fire_size) AS total,
+     CASE units.GeographicArea
+        WHEN 'NA' THEN 'National'
+        WHEN 'IN' THEN 'International'
+        WHEN 'AK' THEN 'Alaska'
+        WHEN 'CA' THEN 'California'
+        WHEN 'EA' THEN 'Eastern Area'
+        WHEN 'GB' THEN 'Great Basin'
+        WHEN 'NR' THEN 'Northern Rockies'
+        WHEN 'NW' THEN 'Northwest'
+        WHEN 'RM' THEN 'Rocky Mountain'
+        WHEN 'SA' THEN 'Southern Area'
+        WHEN 'SW' THEN 'Southwest'
+     END geographic_area
+   FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId GROUP BY units.GeographicArea ORDER BY 1 DESC")
+
+total_burnt
+```
+
+```{r}
+# https://www.r-graph-gallery.com/234-a-very-basic-treemap.html
+
+treemap::treemap(total_burnt, index = 'geographic_area', vSize = 'total', type = 'index', title = "What regions burned the most?")
+```
+
+
+```{r}
+# https://github.com/jakevdp/data-USstates
+abbrevs <- read.csv('us_state-abbrevs.csv')
+census <- read.csv('us_state-population.csv') %>%
+  filter(ages == "total" & year == 2012) %>%
+  merge(abbrevs, by.x = c("state.region"), by.y = c("abbreviation")) %>%
+  select(state, population)
+
+# note: Alaska and California regions have been renamed because the highcharts
+# library requires unique labels across all levels
+total_burnt2 <- dbGetQuery(
+  con,
+  "SELECT
+     SUM(f.fire_size) AS total, f.state AS abbreviation,
+     CASE units.GeographicArea
+        WHEN 'NA' THEN 'National'
+        WHEN 'IN' THEN 'International'
+        WHEN 'AK' THEN 'Alaska (region)'
+        WHEN 'CA' THEN 'California (region)'
+        WHEN 'EA' THEN 'Eastern Area'
+        WHEN 'GB' THEN 'Great Basin'
+        WHEN 'NR' THEN 'Northern Rockies'
+        WHEN 'NW' THEN 'Northwest'
+        WHEN 'RM' THEN 'Rocky Mountain'
+        WHEN 'SA' THEN 'Southern Area'
+        WHEN 'SW' THEN 'Southwest'
+     END geographic_area
+   FROM Fires f INNER JOIN NWCG_UnitIDActive_20170109 units ON f.NWCG_REPORTING_UNIT_ID = units.UnitId
+   GROUP BY units.GeographicArea, f.state
+   ORDER BY 1 DESC") %>%
+# total_burnt2 <-
+  # dbGetQuery(con, "SELECT SUM(f.fire_size) AS total, state,  FROM Fires f GROUP BY state ORDER BY 1 DESC") %>%
+  merge(abbrevs) %>% #, by.x = c("state"), by.y = c("abbreviation")) %>%
+  merge(census)
+total_burnt2$affected <- (total_burnt2$population * total_burnt2$total)
+```
+
+**Important notice!** A state can be in one or more regions. This is how regions are defined in the Fires dataset. This is an issue for our treemaps, because we have no means of "splitting" a state population by region. This issue is only strikingly visible with California, so we manually force it to be just in California region.
+
+We still have duplicate entries, but they should not affect the overall visualization.
+
+```{r}
+# https://www.datanovia.com/en/lessons/highchart-interactive-treemap-in-r/
+# https://www.rdocumentation.org/packages/highcharter/versions/0.8.2/topics/hctreemap
+# https://api.highcharts.com/highcharts/plotOptions.treemap.allowTraversingTree
+# options(highcharter.theme = hc_theme_smpl(tooltip = list(valueDecimals = 2)))
+
+total_burnt2
+# tree <- treemap(
+#   total_burnt2,
+#   index = c('geographic_area', 'state'),
+#   vSize = 'affected',
+#   type = 'index',
+#   title = "What states were the most affected?",
+#   align.labels = list(c('center', 'center'), c('center', 'center')))
+total_burnt22 <- total_burnt2 %>% filter((geographic_area != "California (region)" & state != "California") | geographic_area == "California (region)")
+```
+
+
+```{r}
+hchart(
+  data_to_hierarchical(total_burnt22, group_vars = c(geographic_area, state), size_var = 'population'),
+  type = "treemap",
+  allowTraversingTree = T,
+  layoutAlgorithm = "sliceAndDice",  # squarified
+  layoutStartingDirection = "vertical"  # horizontal
+) %>% hc_title(text = 'US regions by population')
+```
+
+## The most affected regions
+
+```{r}
+hchart(
+  data_to_hierarchical(total_burnt2, group_vars = c(geographic_area, state), size_var = 'affected'),
+  type = "treemap", allowTraversingTree = T,
+  layoutAlgorithm = "sliceAndDice",  # squarified
+  layoutStartingDirection = "vertical"  # horizontal
+) %>%
+  hc_title(text = 'US regions by burned area and population')
+  #hc_tooltip(enabled = F)
+# d3tree(tree, 'What regions and states were the most affected?', width = '780', height = '450')
+```
+
+
+## Deeper dive into geographic EDA
+
+The story continues [here](geo_eda_plots) and [here](models).
+
+
+# Are fires predictable?
+
 Unfortunately, data for large fires is incomplete or missing.
 
 Therefore, the following prediction tasks are limited to small fires.
 
-Naive Bayes to predict the size of a fire
+## Naive Bayes to predict the size of a fire
 
 ```{r}
 # https://yardstick.tidymodels.org/reference/conf_mat.html
@@ -620,7 +689,7 @@ cm <- test2 %>% conf_mat(pred, FIRE_SIZE_CLASS)
 autoplot(cm, type="heatmap")+scale_fill_gradient(low="white", high="#009194")
 ```
 
-Random forest to predict the cause of a fire
+## Random forest to predict the cause of a fire
 
 ```{r}
 # https://stackoverflow.com/a/64539733
