@@ -1,4 +1,4 @@
-The purpose of this file is to keep track of all resources used so we do not forget to reference something by accident
+The purpose of this document is to keep track of all resources used so we do not forget to reference something by accident.
 
 ### Datasets
 - Short, Karen C. 2017. Spatial wildfire occurrence data for the United States, 1992-2015 [FPAFOD20170508]. 4th Edition. Fort Collins, CO: Forest Service Research Data Archive. https://doi.org/10.2737/RDS-2013-0009.4
@@ -26,6 +26,12 @@ The purpose of this file is to keep track of all resources used so we do not for
 - https://bradleyboehmke.github.io/HOML/random-forest.html
 - https://stackoverflow.com/a/64539733
 - https://yardstick.tidymodels.org/reference/conf_mat.html
+
+**Important notice**
+
+[`Highcharter`](https://github.com/jbkunst/highcharter) package is a wrapper for [`Highcharts`](https://www.highcharts.com/), which requires a paid license for commercial and Governmental use.
+
+`Highcharter` has a similar API to `ggplot2`.
 
 ### Misc
 - https://www.reddit.com/r/RStudio/comments/euew3l/preview_button_gone_can_only_knit/
